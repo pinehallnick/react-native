@@ -7,6 +7,8 @@
 
 package com.facebook.react.modules.websocket;
 
+import android.util.Log;
+
 import androidx.annotation.Nullable;
 import com.facebook.common.logging.FLog;
 import com.facebook.fbreact.specs.NativeWebSocketModuleSpec;
@@ -21,14 +23,25 @@ import com.facebook.react.common.ReactConstants;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.facebook.react.modules.network.ForwardingCookieHandler;
+import com.facebook.react.modules.network.ReactCookieJarContainer;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.security.cert.CertificateException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -81,6 +94,56 @@ public final class WebSocketModule extends NativeWebSocketModuleSpec {
     }
   }
 
+  public OkHttpClient createNewNetworkModuleClient() {
+    try {
+      final TrustManager[] trustAllCerts = new TrustManager[] {
+        new X509TrustManager() {
+          @Override
+          public void checkClientTrusted(
+            java.security.cert.X509Certificate[] chain,
+            String authType
+          ) throws CertificateException {}
+
+          @Override
+          public void checkServerTrusted(
+            java.security.cert.X509Certificate[] chain,
+            String authType
+          ) throws CertificateException {}
+
+          @Override
+          public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+            return new java.security.cert.X509Certificate[] {};
+          }
+        },
+      };
+      final SSLContext sslContext = SSLContext.getInstance("SSL");
+      sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+      final SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+      OkHttpClient.Builder builder = new OkHttpClient.Builder()
+        .connectTimeout(0, TimeUnit.MILLISECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(0, TimeUnit.MILLISECONDS)
+        .cookieJar(new ReactCookieJarContainer());
+      builder.sslSocketFactory(
+        sslSocketFactory,
+        (X509TrustManager) trustAllCerts[0]
+      );
+      builder.hostnameVerifier(
+        new HostnameVerifier() {
+          @Override
+          public boolean verify(String hostname, SSLSession session) {
+            return true;
+          }
+        }
+      );
+      OkHttpClient okHttpClient = builder.build();
+      return okHttpClient;
+    } catch (Exception e) {
+      Log.e(TAG, e.getMessage());
+      throw new RuntimeException(e);
+    }
+  }
+
   @Override
   public void connect(
       final String url,
@@ -88,12 +151,13 @@ public final class WebSocketModule extends NativeWebSocketModuleSpec {
       @Nullable final ReadableMap options,
       final double socketID) {
     final int id = (int) socketID;
-    OkHttpClient client =
-        new OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .writeTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MINUTES) // Disable timeouts for read
-            .build();
+//    OkHttpClient client =
+//        new OkHttpClient.Builder()
+//            .connectTimeout(10, TimeUnit.SECONDS)
+//            .writeTimeout(10, TimeUnit.SECONDS)
+//            .readTimeout(0, TimeUnit.MINUTES) // Disable timeouts for read
+//            .build();
+    OkHttpClient client = createNewNetworkModuleClient();
 
     Request.Builder builder = new Request.Builder().tag(id).url(url);
 
